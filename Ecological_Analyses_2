@@ -1,0 +1,375 @@
+# Taxonomy - Abundance
+
+# Prepare and subset data
+
+Ab_Fam <-tax_glom(DataSet,taxrank = "family", NArm=FALSE)
+
+AbFam_melt <- psmelt(Ab_Fam)  
+
+sub_AbFam <- subset(AbFam_melt, select = c("Sample", "Abundance", "Location", "Dev_Stage", "Tissue", "family"))
+
+# Merge family sums and the total numbers
+
+Totals <- ddply(sub_AbFam, c("Sample"), summarise, total = sum(Abundance))  
+
+fam_totals <- merge(sub_AbFam, Totals, by = "Sample")  
+
+# Calculate the relative abundance (how is the total abundance of a specific 
+# family distributed among samples)
+
+fam_totals$RelAbundance <- fam_totals$Abundance/fam_totals$total  
+
+#  Calculate the Percent Abundance
+
+fam_totals$PercentAbund <- fam_totals$RelAbundance * 100  
+fam_totals <- fam_totals[!is.na(fam_totals$family),]
+
+#  Calculate the family abundance based on the developmental stage, tissue and the location.  
+
+fam_stats <- ddply(fam_totals, c("Location","Dev_Stage", "Tissue","family"), summarise, 
+                 N = length(PercentAbund),
+                 mean_abundance = mean(PercentAbund),
+                 sd   = sd(PercentAbund),
+                 se   = sd / sqrt(N))
+
+L_stats <- ddply(fam_totals, c("Location","family"), summarise, 
+                                N = length(PercentAbund),
+                                mean_abundance = mean(PercentAbund),
+                                sd   = sd(PercentAbund),
+                                se   = sd / sqrt(N))
+
+T_stats <- ddply(fam_totals, c("Tissue","family"), summarise, 
+                 N = length(PercentAbund),
+                 mean_abundance = mean(PercentAbund),
+                 sd   = sd(PercentAbund),
+                 se   = sd / sqrt(N))
+
+A_stats <- ddply(fam_totals, c("Dev_Stage","family"), summarise, 
+                 N = length(PercentAbund),
+                 mean_abundance = mean(PercentAbund),
+                 sd   = sd(PercentAbund),
+                 se   = sd / sqrt(N))
+
+#  Only the family 
+
+abund_by_fam <- ddply(fam_stats, c("family"), summarise, 
+                              N = length(mean_abundance),
+                              family_mean = mean(mean_abundance))
+
+abund_by_fam <-arrange(abund_by_fam, desc(family_mean))
+
+# Create a vector of the families 
+
+fam_order <- as.character(abund_by_fam$family) 
+
+# Top 12 most abundant families
+
+fam12_order <- as.character(abund_by_fam$family)[1:12]
+
+top12famL <- L_stats[L_stats$family %in% fam_order[1:12], ] 
+top12famT <- T_stats[T_stats$family %in% fam_order[1:12], ] 
+top12famA <- A_stats[A_stats$family %in% fam_order[1:12], ] 
+
+# Put the phyla in the right order in terms of total relative abundance
+
+fam12_order <- as.character(abund_by_fam$family)[1:12]
+
+top12famL$family <- factor(top12famL$family,
+                          levels = c(fam12_order))
+
+top12famT$family <- factor(top12famT$family,
+                          levels = c(fam12_order))
+
+top12famA$family <- factor(top12famA$family,
+                          levels = c(fam12_order))
+
+# Stats
+
+sum(top12famL[, 'mean_abundance'])
+
+# Plot
+
+LocGG <- ggplot(data = top12famL, aes(x=mean_abundance, y=reorder(family, desc(family)))) +
+  geom_errorbar(aes(xmin = mean_abundance -se, xmax = mean_abundance +se), width = 0.25, color = "black") + 
+  xlab("Mean Percent Relative Abundance (%)") + geom_bar(stat='identity')+ 
+  facet_wrap(~Location) + theme(legend.position="none") +  
+  theme(axis.text.x = element_text(angle = 90), axis.text.y=element_blank()) +
+  theme_classic() + ylab("Family")
+
+TisGG <- ggplot(data = top12famT, aes(x=mean_abundance, y=reorder(family, desc(family)))) +
+  geom_errorbar(aes(xmin = mean_abundance -se, xmax = mean_abundance +se), width = 0.25, color = "black") + 
+  xlab("Mean Percent Relative Abundance (%)") + geom_bar(stat='identity')+ 
+  facet_wrap(~Tissue) + theme(legend.position="none") +  
+  theme(axis.text.x = element_text(angle = 90), axis.text.y=element_blank()) +
+  theme_classic() + ylab("Family")
+
+DeStGG <- ggplot(data = (subset(top12famA, !is.na(Dev_Stage))), aes(x=mean_abundance, y=reorder(family, desc(family)))) + 
+                   geom_errorbar(aes(xmin = mean_abundance -se, xmax = mean_abundance +se), width = 0.25, color = "black") + 
+                   xlab("Mean Percent Relative Abundance (%)") + geom_bar(stat='identity')+ 
+                   facet_wrap(~Dev_Stage) + theme(legend.position="none") +  
+                   theme(axis.text.x = element_text(angle = 90), axis.text.y=element_blank()) +
+                   theme_classic() + ylab("Family")
+
+# Assigning ecological function
+
+library(fungaltraits)
+
+# load ITS data
+
+t_table <- as.data.frame(DataSet@tax_table)
+colnames(t_table) <- c("Kingdom","Phylum","Class","Order","Family","Genus","Species")
+
+# create microtable object
+meco_fungi <- microtable$new(sample_table = DataSet@sam_data, otu_table = t(DataSet@otu_table), t_table)
+
+# use tidy_dataset() to make OTUs and samples information consistent across files
+meco_fungi$tidy_dataset()
+
+# create trans_network object
+#t1 <- trans_network$new(dataset = meco_fungi, cal_cor = "WGCNA", 
+                      #  taxa_level = "Family", filter_thres = 0.000001, 
+                      #  cor_method = "spearman")
+
+# create correlation network 
+#t1$cal_network(COR_p_thres = 0.05, COR_cut = 0.6)
+
+# add modules
+#t1$cal_module()
+
+# convert module info to microtable object
+#meco_module <- t1$trans_comm(use_col = "module")
+
+# create trans_func object
+t2 <- trans_func$new(meco_fungi) #meco_module
+
+# identify species traits, automatically select database for fungi
+t2$cal_spe_func(fungi_database = "FungalTraits")
+
+# Extract as data frame 
+Fguild <- as.data.frame(t2$res_spe_func)
+
+#Keep only columns with more than 0 counts
+Fguild <- Fguild %>% select_if(~ !is.numeric(.) || sum(.) != 0)
+
+#Extract as data frame
+FunTraits <- as.data.frame(t2$res_spe_func_raw_FungalTraits)
+
+FunTraitsTF <- FunTraits[FunTraits$Family %in% fam_order[1:12], ] 
+FunTraitsTF <- FunTraitsTF[,-c(1:4,7:8,11,14:16, 18:21, 26:27),drop=FALSE]
+
+# Delete rows with repeated information
+FunTraitsTF <- distinct(FunTraitsTF)
+
+# Delete empty rows
+FunTraitsTF <- FunTraitsTF %>% drop_na()
+
+FunTraitsTF <- FunTraitsTF[,-c(5:11),drop=FALSE]
+
+PLTP <- FunTraitsTF[,-c(4),drop=FALSE]
+SLTP <- FunTraitsTF[,-c(3),drop=FALSE]
+
+colnames(PLTP)[3] <- "Lifestyle"
+colnames(SLTP)[3] <- "Lifestyle"
+
+#Drop empty rows
+SLTP <- SLTP[!(SLTP$Lifestyle==""), ]
+
+# Merge rows
+FTTF_S <- rbind(PLTP, SLTP)
+
+FTTF_S <- FTTF_S %>%
+  dplyr::group_by(Family, Lifestyle) %>%
+  dplyr::summarise(n = dplyr::n(), .groups = "drop") 
+
+FTTF_S <- pivot_wider(FTTF_S, names_from = Lifestyle, values_from = n) 
+FTTF_S <- as.data.frame(FTTF_S)
+
+FTTF_S <- FTTF_S %>%
+  arrange(desc(sapply(Family, function(y) which(y == fam12_order))))
+
+rownames(FTTF_S) <- FTTF_S[,1]
+FTTF_S <- FTTF_S[,-1,drop=FALSE]
+FTTF_S[is.na(FTTF_S)] <- 0
+FTTF_S[FTTF_S > 0] <- 1
+
+colnames(FTTF_S)
+
+colnames(FTTF_S) <- c("Foliar endophyte", "Plant pathogen", "Litter saprotroph",
+                      "Wood saprotroph", "Animal decomposer", "Animal parasite", 
+                       "Fungal decomposer", "Mycoparasite", "Soil saprotroph")
+
+levelplot(t(FTTF_S), col.regions= gray(100:25/100), border="black", cuts=12,
+          drop.unused.levels =lattice.getOption("drop.unused.levels"), 
+          colorkey=FALSE, scales=list(x=list(rot=45), tck = c(1,0)),
+          ylab="Family", xlab="Functional Diversity" )
+
+# Indicator species
+
+library(indicspecies)
+
+Tissue <- Ab_Fam@sam_data$Tissue
+Location <- Ab_Fam@sam_data$Location
+
+InSp_L <-  multipatt(otu_table(Ab_Fam), Location, func = "r.g", control = how(nperm=9999))
+summary(InSp_L, alpha=1)
+summary(InSp_L, indvalcomp = TRUE,alpha=1)
+
+ISL <- InSp_L$sign[InSp_L$sign$p.value<=0.05,] 
+
+TT <- as.data.frame(tax_table(Ab_Fam))
+TT <- TT[,-c(1:4,6:7),drop=FALSE]
+
+ISL <- merge(ISL, TT, by=0, all=FALSE) 
+
+ISL_TF <- ISL[ISL$family %in% fam12_order, ]
+
+InSp_T <-  multipatt(otu_table(Ab_Fam), Tissue, func = "r.g", control = how(nperm=9999))
+
+IST <- InSp_T$sign[InSp_T$sign$p.value<=0.05,] 
+
+IST <- merge(IST, TT, by=0, all=FALSE) 
+
+IST_TF <- IST[IST$family %in% fam12_order, ]
+
+LeavesPS <- subset_samples(DataSet, Tissue == "Leaf")
+LeavesPS <- prune_taxa(taxa_sums(LeavesPS) > 0, LeavesPS)
+Leaf_Fam <-tax_glom(LeavesPS,taxrank = "family")
+Age <- Leaf_Fam@sam_data$Dev_Stage
+
+TT_A <- as.data.frame(tax_table(Leaf_Fam))
+TT_A <- TT_A[,-c(1:4,6:7),drop=FALSE]
+
+InSp_A <-  multipatt(otu_table(Leaf_Fam), Age, func = "r.g", control = how(nperm=9999))
+ISA <- InSp_A$sign[InSp_A$sign$p.value<=0.05,] 
+ISA <- merge(ISA, TT_A, by=0, all=FALSE) 
+ISA_TF <- ISA[ISA$family %in% fam12_order, ]
+
+# CLAM test
+
+library(vegan)
+
+CTL <- clamtest(otu_table(Ab_Fam), Ab_Fam@sam_data$Location, alpha=0.005)
+plot(CTL)
+summary(CTL)
+
+CTLdf <- as.data.frame(CTL)
+rownames(CTLdf) <- CTLdf[,1]
+CTLdf <- CTLdf[,-1,drop=FALSE]
+
+CTL_F <- merge(CTLdf, TT, by=0, all=FALSE) 
+CTL_TF <- CTL_F[CTL_F$family %in% fam12_order, ]
+
+CTL_TF <- CTL_TF %>%
+  arrange(sapply(family, function(y) which(y == fam12_order)))
+
+CTT <- clamtest(otu_table(Ab_Fam), Ab_Fam@sam_data$Tissue, alpha=0.005)
+CTTdf <- as.data.frame(CTT)
+rownames(CTTdf) <- CTTdf[,1]
+CTTdf <- CTTdf[,-1,drop=FALSE]
+
+CTT_F <- merge(CTTdf, TT, by=0, all=FALSE) 
+CTT_TF <- CTT_F[CTT_F$family %in% fam12_order, ]
+
+CTT_TF <- CTT_TF %>%
+  arrange(sapply(family, function(y) which(y == fam12_order)))
+
+CTA <- clamtest(otu_table(Leaf_Fam), Leaf_Fam@sam_data$Dev_Stage, alpha=0.005)
+CTAdf <- as.data.frame(CTA)
+rownames(CTAdf) <- CTAdf[,1]
+CTAdf <- CTAdf[,-1,drop=FALSE]
+
+CTA_F <- merge(CTAdf, TT_A, by=0, all=T) 
+CTA_TF <- CTA_F[CTA_F$family %in% fam12_order, ]
+
+CTA_TF <- CTA_TF %>%
+  arrange(sapply(family, function(y) which(y == fam12_order)))
+
+library(gridExtra)
+
+CTA_TF$color[CTA_TF$Classes == "Specialist_New"] <- "darkolivegreen1"
+CTA_TF$color[CTA_TF$Classes == "Specialist_Mature"] <- "darkolivegreen"
+CTA_TF$color[CTA_TF$Classes == "Generalist"] <- "white"
+
+CTA_theme <- ttheme_default(core=list(bg_params = list(fill = CTA_TF$color,
+                                                       rep("grey80",5), col="white",lwd = 2)))
+CTA_TF$color <- 1
+
+grid.table(CTA_TF, theme = CTA_theme)     
+
+CTT_TF$color[CTT_TF$Classes == "Specialist_Leaf"] <- "#299617"
+CTT_TF$color[CTT_TF$Classes == "Specialist_Sapwood"] <- "#97512A"
+CTT_TF$color[CTT_TF$Classes == "Generalist"] <- "white"
+      
+CTT_theme <- ttheme_default(core=list(bg_params = list(fill = CTT_TF$color,
+                                                           rep("grey80",5), col="white",lwd = 2)))
+
+CTT_TF$color <- 1
+    
+grid.table(CTT_TF, theme = CTT_theme)     
+
+CTL_TF$color[CTL_TF$Classes == "Specialist_Golfito"] <- "orange"
+CTL_TF$color[CTL_TF$Classes == "Specialist_Guanacaste"] <- "steelblue"
+CTL_TF$color[CTL_TF$Classes == "Generalist"] <- "white"
+      
+CTL_theme <- ttheme_default(core=list(bg_params = list(fill = CTL_TF$color,
+                                                           rep("grey80",5), col="white",lwd = 2)))
+    
+CTL_TF$color <- 1
+    
+grid.table(CTL_TF, theme = CTL_theme)   
+
+# Prevalence
+
+prevdf <- apply(X = otu_table(Ab_Fam),
+                MARGIN = ifelse(taxa_are_rows(Ab_Fam), yes = 1, no = 2),
+                FUN = function(x){sum(x > 0)})
+
+# Add taxonomy to this data.frame
+
+prevdf <- data.frame(Prevalence = prevdf,
+                     tax_table(Ab_Fam))
+
+prevdf <- prevdf[,-c(2:5,7:8),drop=FALSE]
+
+# Calculate the percent prevalence
+
+prevdf$PrevPercent <- prevdf$Prevalence/194 * 100  
+
+prev_TF <- prevdf[prevdf$family %in% fam12_order, ]
+
+prev_TF <- prev_TF %>%
+  arrange(sapply(family, function(y) which(y == fam12_order)))
+
+library(gplots)
+
+heatmap.2(cbind(prev_TF$Prevalence, prev_TF$PrevPercent), trace="n", Colv = NA, 
+          dendrogram = "none", labCol = "", labRow = prev_TF$family, cexRow = 0.75,
+          rowsep = 1:nrow(prev_TF), sepcolor="white", Rowv = FALSE, 
+          col=RColorBrewer::brewer.pal(9,"Purples"), density.info='none')
+
+# d' index
+
+PlxFm <- merge_samples(Ab_Fam, "Plant")
+
+mtxF <- t(as.data.frame(otu_table(PlxFm)))
+
+library(bipartite)
+library(gplots)
+
+dIndx <- dfun(mtxF)
+
+DIL <- dIndx$dprime 
+
+DIL <- merge(DIL, TT, by=0, all=FALSE) 
+
+DIL_TF <- DIL[DIL$family %in% fam12_order, ]
+
+DIL_TF <- DIL_TF %>%
+  arrange(sapply(family, function(y) which(y == fam12_order)))
+
+heatmap.2(cbind(DIL_TF$x, DIL_TF$x), trace="n", Colv = NA, 
+          dendrogram = "none", labCol = "", labRow = DIL_TF$x, cexRow = 0.75,
+          rowsep = 1:nrow(prev_TF), sepcolor="white", Rowv = FALSE, 
+          col=RColorBrewer::brewer.pal(9,"Reds"), density.info='none')
+
+
