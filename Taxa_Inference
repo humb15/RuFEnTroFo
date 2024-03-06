@@ -1,0 +1,187 @@
+# From DADA2 pipeline tutorial - modified.
+
+library(dada2)
+library(DECIPHER)
+
+# Define the following path variable so that it points to the extracted directory on your machine
+
+path_Golf<- ("/Users/Your/Path")
+path_Guana<- ("/Users/Your/Path
+path_LM<- ("/Users/Your/Path")
+path_SM<- ("/Users/Your/Path")
+
+path <- c(path_Golf, path_Guana, path_LM, path_SM)
+
+list.files(path)
+
+#The data is already merged in contigs, so next step is perform filtering and trimming
+
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+fnAll <- sort(list.files(path, pattern="_trimmed", full.names = TRUE))
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnAll), "_trimmed"), `[`, 1)
+
+# Visualizating the quality profiles of the reads 
+
+plotQualityProfile(fnAll[1:6])
+
+# Now, perform filtering and trimming. 
+
+# Assign the filenames for the filtered fastq.gz files.
+
+filt_path <- file.path("/Users/humbe/Desktop/Metagenomics/Taxa_Assignment/Sequences", "Filtered") 
+# All sequences from every path will be placed in same folder, when done with this script manually sort to correct directory
+filtAll <- file.path(filt_path, paste0(sample.names, "filt.fastq.gz"))
+
+# Filter
+
+out <- filterAndTrim(fnAll, filtAll, #For ITS  leave out truncLen
+                     maxN=0, maxEE=c(2), truncQ=2, rm.phix=TRUE, 
+                     compress=TRUE, multithread=TRUE, trimLeft=15) # On Windows set multithread=FALSE
+head(out)
+
+#Check out how many reads are passing the filter and adjust if necessary.
+
+# Learn the Error Rates.
+
+errT <- learnErrors(filtAll, multithread=TRUE, randomize = TRUE, MAX_CONSIST = 15)
+
+# Visualize the estimated error rates.
+
+plotErrors(errT, nominalQ=TRUE)
+
+# Dereplication
+
+# Dereplication combines all identical sequencing reads into into "unique sequences" with a corresponding "abundance": the number of reads with that unique sequence. Dereplication substantially reduces computation time by eliminating redundant comparisons.
+#DADA2 retains a summary of the quality information associated with each unique sequence. 
+
+# Dereplicate the filtered fastq files
+
+derepSq <- derepFastq(filtAll, verbose=TRUE)
+
+# Name the derep-class objects by the sample names
+names(derepSq) <- sample.names
+
+# Sample Inference
+
+# Infer the sequence variants in each sample
+
+dadaSeqs <- dada(derepSq, err=errT, multithread=TRUE, HOMOPOLYMER_GAP_PENALTY=-1, BAND_SIZE=32)
+## The last were parameters for denoising pyrosequencing data (like IT)
+
+# Inspecting the dada-class object returned by dada:
+
+dadaSeqs[[1]]
+
+# From IonTorrent sequences are already merged.
+
+# Inspect the merger data.frame from the first sample
+
+head(dadaSeqs[[1]])
+
+# Construct sequence table
+
+seqtab <- makeSequenceTable(dadaSeqs)
+
+dim(seqtab)
+
+# Inspect distribution of sequence lengths
+
+table(nchar(getSequences(seqtab)))
+
+# Sequences that are much longer or shorter than expected may be the result of non-specific priming, and may be worth removing (eg. seqtab2 <- seqtab[,nchar(colnames(seqtab)) %in% seq(250,256)])
+# Keep sequence lenghts with more than 30 representatives
+
+seqtab_purged <- seqtab[,nchar(colnames(seqtab)) %in% seq(236,322)]
+
+# Remove chimeric sequences:
+
+seqtab.nochim <- removeBimeraDenovo(seqtab_purged, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+
+sum(seqtab.nochim)/sum(seqtab)
+
+# Track reads through the pipeline
+# As a final check of our progress, we'll look at the number of reads that made it through each step in the pipeline:
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaSeqs, getN), rowSums(seqtab), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoised", "tabled", "nonchim")
+rownames(track) <- sample.names
+head(track)
+
+# Filter out seqs found in controls
+
+ctrl.samples <- c("NEG_CTRL", "POS_CTRL", "CONTROL") # CHANGE to names of your negative controls
+found.in.ctrls <- colSums(seqtab.nochim[ctrl.samples,])>0
+seqtab.Final <- seqtab.nochim[,!found.in.ctrls]
+
+#Track sequences
+
+track <- cbind(out, sapply(dadaSeqs, getN), rowSums(seqtab), rowSums(seqtab.nochim), rowSums(seqtab.Final))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoised", "tabled", "nonchim", "NoCtrls")
+rownames(track) <- sample.names
+head(track)
+
+# Assign taxonomy
+
+# I've downloaded the trained set from DECIPHER website
+
+UNITE_db <- readDNAStringSet("~/PATH/TO/UNITE/UNITE_v2021.fasta")
+
+s <- strsplit(names(UNITE_db), ";")
+kingdom <- sapply(s, `[`, 1)
+phylum <- sapply(s, `[`, 2)
+class <- sapply(s, `[`, 3)
+order <- sapply(s, `[`, 4)
+family <- sapply(s, `[`, 5)
+genus <- sapply(s, `[`, 6)
+species <- sapply(s, `[`, 7)
+
+taxonomy <- paste("Root", kingdom, phylum, class, order, family, genus, species, sep = ";")
+TrainingSet <- LearnTaxa(UNITE_db, taxonomy)
+
+dna <- DNAStringSet(getSequences(seqtab.Final)) # Create a DNAStringSet from the ASVs
+ids <- IdTaxa(dna, trainingSet, strand="both", processors=NULL, verbose=TRUE) # use all processors
+ranks <- c("kingdom", "phylum", "class", "order", "family", "genus", "species") # ranks of interest
+
+# Convert the output object of class "Taxa" to a matrix analogous to the output from assignTaxonomy
+
+taxid <- t(sapply(ids, function(x) {
+  m <- match(ranks, x$rank)
+  taxa <- x$taxon[m]
+  taxa[startsWith(taxa, "unclassified_")] <- NA
+  taxa[startsWith(taxa, "unidentified_")] <- NA
+  taxa[startsWith(taxa, "unidentified")] <- NA
+  taxa[startsWith(taxa, "Fungi_sp")] <- NA
+  taxa[startsWith(taxa, "Ascomycota_sp")] <- NA
+  taxa
+}))
+
+colnames(taxid) <- ranks; rownames(taxid) <- getSequences(seqtab.Final)
+
+taxa <- taxid
+
+# Inspect the taxonomic assignments:
+
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+
+# Evaluate accuracy
+
+# Evaluating DADA2's accuracy on positive control:
+
+# unqs.russula <- ST_Golfito["POS_CTRL",]
+# unqs.russula <- sort(unqs.russula[unqs.russula>0], decreasing=TRUE) # Drop ASVs absent in the Positive control
+# cat("DADA2 inferred", length(unqs.russula), "sample sequences present in the Positive control.\n")
+
+# PosCtrl.ref <- getSequences(file.path(path, "/PATH/Russula.fasta"))
+# match.ref <- sum(sapply(names(unqs.russula), function(x) any(grepl(x, PosCtrl.ref))))
+# cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
+
+# Ends of the DADA2 portion
+
