@@ -1,0 +1,570 @@
+library(plyr)
+library(MicroEco)
+library(vegan)
+
+# HYPOTHESIS 1
+
+# Microbiomes are affected by location
+# Include all samples (leaves and sapwood)
+
+# Shared ASVs
+
+ps_venn(DataSet, group = "Location")
+
+# Alpha Diversity
+
+# Plot 
+
+plot_richness(DataSet, x="Location", shape = NA, color="Location", measures=c("Observed", "Shannon", "Simpson", "Chao1", "InvSimpson"))+ 
+  geom_boxplot(outlier.shape=NA, outlier.colour = NA, notch = TRUE, notchwidth = 0.5)
+
+RD_L <- estimate_richness(DataSet, measures = c("Shannon", "InvSimpson", "Chao1"))
+RD_L$Hill <- exp(RD_L$Shannon) 
+
+# For hill effective species numbers, exponential Shannon and Inv Simpson should be used
+
+#Then plot each metric.
+
+par(mfrow=c(2,2))
+
+hist1 <- hist(RD_L$Hill, main="Shannon diversity", xlab="", breaks=10)
+#hist2 <- hist(RD_L$Simpson, main="Simpson diversity", xlab="", breaks=10)
+hist3 <- hist(RD_L$InvSimpson, main="Inv Simpson diversity", xlab="", breaks=10)
+hist4 <- hist(RD_L$Chao1, main="Chao richness", xlab="", breaks=15)
+
+par(mfrow=c(1,1))
+
+# Density plot
+
+# library("ggpubr")
+
+# ggdensity(RD_L$Shannon, 
+         # main = "Shannon diversity",
+         # xlab = "")
+
+# Q-Q Plot
+
+qq1<- ggqqplot(RD_L$Hill, title = "Shannon")
+qq2<- ggqqplot(RD_L$Simpson, title = "Simpson")
+qq3<- ggqqplot(RD_L$InvSimpson, title = "Inv Simpson")
+qq4<- ggqqplot(RD_L$Chao1, title = "Chao")
+
+library(cowplot)
+
+plot_grid(qq1, qq2, qq3, qq4,
+          ncol=2, nrow=2)
+
+# If all the points fall approximately along this reference line, we can assume normality.
+
+# Data must be roughly normal to run ANOVA or t-tests
+
+# To test for normality statistically, we can run the Shapiro-Wilk test of normality.
+
+shapiro.test(RD_L$Hill)
+#shapiro.test(RD_L$Simpson)
+shapiro.test(RD_L$InvSimpson)
+shapiro.test(RD_L$Chao1)
+
+# p-values are very small < 0.05, so there's strong evidence to reject the null hypothesis and conclude that the data is not normally distributed. 
+
+# Non-normally distributed metrics
+# Since tissue is categorical and we have only two levels, we will run a non-parametric equivalent of t-test:Mann-Whitney; The test ranks all
+# the data from both samples together, and it tests the null hypothesis that the distributions of the two groups are the same.
+
+wilcox.test(Loc_values$Guanacaste, Loc_values$Golfito, p.adjust.method="fdr")
+
+# Beta Diversity
+
+# NMDS
+
+# Com_mat <- as.matrix(otu_table(DataSet))
+
+set.seed(1992)
+nmdsL <- metaMDS(otu_table(DataSet), distance = "bray", trymax = 100)
+
+# Extracting scores
+
+data.scores <- as.data.frame(scores(nmdsL))
+
+# Add columns to data frame 
+
+data.scores <- merge(data.scores, DataSet@sam_data, by=0, all=TRUE)  # by=0 equals by="row.names"
+
+# Remove outliers or change the axes
+
+data.scores <- data.scores[-c(7, 71, 110),] # C_C*, T_C and Gu_U_C
+
+# Plotting with ggplot
+
+gg <- ggplot(data = data.scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(data = data.scores, aes(colour = Location), size = 3, alpha = 0.5) + 
+  scale_colour_manual(values = c("orange", "steelblue")) + 
+  theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+        axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+        legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        legend.text = element_text(size = 9, colour = "grey30")) +
+  labs(colour = "Location")
+
+gg
+
+# Add ellipses
+
+gg + # geom_point(aes(x = NMDS1, y = NMDS2,color=Location),size=1) + 
+  stat_ellipse(aes(x = NMDS1, y = NMDS2,color=Location, group=Location),type = "norm")
+
+# Statistical analyses
+
+# Transform data to proportions as appropriate for Bray-Curtis distances 
+
+Data.prop <- transform_sample_counts(DataSet, function(otu) otu/sum(otu))
+
+BC.dist<-vegdist(otu_table(Data.prop), distance="bray", binary=FALSE, diag=FALSE, upper=FALSE, na.rm=FALSE)
+
+# Calculate dispersion (variances) within each group.
+
+var.loc <- betadisper(BC.dist, as.factor(DataSet@sam_data[["Location"]]), type=c("median"))
+
+# Perform an ANOVA-like test to determine if the variances differ by groups.
+# H0: no difference between the groups being compared.
+
+permutest(var.loc, permutations=1000)
+
+# within-group variances are equal or homogenous so I can follow up with a permanova
+
+plot(var.loc, hull = FALSE, ellipse = TRUE, main = NULL)
+
+var.loc
+
+Var.scores <- data.frame(Location = c('Golfito', 'Guanacaste'), Variance = c(0.6289, 0.6463))
+
+ggplot(Var.scores, aes(x = Location, y = Variance), fill = Variance) +
+  geom_point(shape=18, size=3) + geom_line(group=1) +
+  theme_classic() +
+  ylim(0.5,0.7) + ylab("Within-group variance")
+
+# Run PERMANOVA on distances.
+# H0: no difference in multivariate dispersion between groups
+
+adonis2(BC.dist ~ DataSet@sam_data$Location, permutations = 1000, method = "bray")
+
+# Research outliers
+
+outliers <- as.data.frame(t(get_taxa(DataSet, c("C_C", "Gu_U_C", "T_C"))))
+
+rowAny <- function(x) rowSums(x) > 0
+
+outliers <- outliers %>% 
+  filter(rowAny(across(where(is.numeric), ~ .x > 0)))
+
+Out_ASV <- row.names(outliers)
+
+Out_Taxa <- prevdf[Out_ASV,]
+
+inv <- subset_taxa(DataSet, species=="Psathyrella_pennata")
+inv@otu_table
+
+# Effect of vectors on distribution pattern
+
+ggplot(data = data.scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(data = data.scores, aes(colour = AMT, shape = Location), size = 3, alpha = 0.5) + 
+  scale_colour_continuous(high = "red", low = "green") +
+  theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+        axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+        legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        legend.text = element_text(size = 9, colour = "grey30")) +
+  labs(colour = "AMT", shape = "Location")
+
+data.scores[is.na(data.scores)] <- "Sapwood"
+
+ggplot(data = data.scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(data = data.scores, aes(colour = Plant, shape = Dev_Stage), size = 3, alpha = 0.5) + 
+  theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+        axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+        legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        legend.text = element_text(size = 9, colour = "grey30")) +
+  labs(colour = "Plant", shape = "Dev_Stage") + 
+  theme(legend.position = "none")
+
+# GUANCASTE
+
+GuanaPS <- subset_samples(DataSet, Location == "Guanacaste")
+GuanaPS <- prune_taxa(taxa_sums(GuanaPS) > 0, GuanaPS)
+any(taxa_sums(GuanaPS) == 0)
+
+nmdsGu <- metaMDS(otu_table(GuanaPS), distance = "bray", trymax = 100)
+
+# Extracting scores
+
+Gu.scores <- as.data.frame(scores(nmdsGu))
+
+# Add columns to data frame 
+
+Gu.scores <- merge(Gu.scores, GuanaPS@sam_data, by=0, all=TRUE)  # by=0 equals by="row.names"
+
+# Remove outliers or change the axes
+
+Gu.scores <- Gu.scores[-50,]
+
+# Plotting with ggplot
+
+ggplot(data = Gu.scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(data = Gu.scores, aes(colour = Region), size = 3, alpha = 0.5) + 
+  scale_colour_manual(values = c("#00A9FF", "#F8766D", "#00BE67")) + 
+  theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+        axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+        legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        legend.text = element_text(size = 9, colour = "grey30")) +
+  labs(colour = "Region")
+
+# Statistical analyses
+
+# Transform data to proportions as appropriate for Bray-Curtis distances 
+
+Data.pro <- transform_sample_counts(GuanaPS, function(otu) otu/sum(otu))
+
+BC_dist<-vegdist(otu_table(Data.pro), distance="bray", binary=FALSE, diag=FALSE, upper=FALSE, na.rm=FALSE)
+
+# Calculate dispersion (variances) within each group.
+
+var.Gu <- betadisper(BC_dist, as.factor(GuanaPS@sam_data[["Region"]]), type=c("median"))
+
+# Perform an ANOVA-like test to determine if the variances differ by groups.
+# H0: no difference between the groups being compared.
+
+permutest(var.Gu, permutations=1000)
+
+# within-group variances are equal or homogenou so I can follow up with a permanova
+
+plot(var.Gu, hull = FALSE, ellipse = TRUE, main = NULL)
+
+var.Gu
+
+# Run PERMANOVA on distances.
+# H0: no difference in multivariate dispersion between groups
+
+adonis2(BC_dist ~ GuanaPS@sam_data$Region, permutations = 1000, method = "bray")
+
+# HYPOTHESIS 2
+
+# Microbiomes differ by tissue type 
+# Only individuals from which both leaves and sapwood samples were collected
+
+#CompletePS@sam_data$Dev_Stage[is.na(CompletePS@sam_data$Dev_Stage)] <- "Sapwood"
+
+# Shared ASVs
+
+ps_venn(CompletePS, group = "Tissue")
+
+# Alpha Diversity
+
+Sapw <- subset_samples(CompletePS, Tissue == "Sapwood") 
+Lvs <- subset_samples(CompletePS, Tissue == "Leaf") 
+
+rich_S <- estimate_richness(Sapw, measures = c("Shannon", "InvSimpson", "Chao1"))
+
+# Plot 
+
+plot_richness(CompletePS, x="Tissue", shape = NA, color="Tissue", measures=c("Observed", "Shannon", "Simpson", "Chao1", "InvSimpson"))+ 
+  geom_boxplot(outlier.shape=NA, outlier.colour = NA, notch = TRUE, notchwidth = 0.5)
+
+rich_T <- estimate_richness(CompletePS, measures = c("Shannon", "InvSimpson", "Chao1"))
+rich_T$Hill <- exp(rich_T$Shannon)
+rich_T
+
+# Investigate if data is normal: plot each metric.
+
+par(mfrow=c(2,2))
+
+hist(rich_T$Hill, main="Shannon diversity", xlab="", breaks=10)
+hist(rich_T$Simpson, main="Simpson diversity", xlab="", breaks=10)
+hist(rich_T$InvSimpson, main="Inv Simpson diversity", xlab="", breaks=10)
+hist(rich_T$Chao1, main="Chao richness", xlab="", breaks=15)
+
+par(mfrow=c(1,1))
+
+# Density plot
+
+# library("ggpubr")
+
+# ggdensity(RD_L$Shannon, 
+#main = "Shannon diversity",
+#xlab = "")
+
+# Q-Q Plot
+
+qq1<- ggqqplot(rich_T$Shannon, title = "Shannon")
+qq2<- ggqqplot(rich_T$Hill, title = "Hill")
+qq3<- ggqqplot(rich_T$InvSimpson, title = "Inv Simpson")
+qq4<- ggqqplot(rich_T$Chao1, title = "Chao")
+
+plot_grid(qq1, qq2, qq3, qq4,
+          ncol=2, nrow=2)
+
+shapiro.test(rich_T$Hill)
+shapiro.test(rich_T$Simpson)
+shapiro.test(rich_T$InvSimpson)
+shapiro.test(rich_T$Chao1)
+
+# p-values are very small < 0.05, so there's strong evidence to reject the null hypothesis and conclude that the data is not normally distributed. 
+
+# Non-normally distributed metrics
+
+wilcox.test(T_values$Leaf, T_values$Sapwood, p.adjust.method="fdr")
+
+wilcox_test(rich_T, Chao1 ~ CompletePS@sam_data[["Tissue"]], p.adjust.method="fdr")
+
+# Can't compute exact p-value because of ranks/ Asymptotic:
+
+metaD$Tissue <- as.factor(metaD$Tissue)
+wilcox_test(Chao1 ~ Tissue, data = metaD)
+
+# Beta Diversity
+
+# Replace 'NA' with 'Sapwood'
+
+sample_data(CompletePS)$Dev_Stage <- sample_data(CompletePS)$Dev_Stage %>% replace_na('Sapwood')
+
+# NMDS
+
+set.seed(1506)
+
+nmds_T <- metaMDS(otu_table(CompletePS), distance = "bray", trymax = 100)
+
+# Extracting scores
+
+d_scores <- as.data.frame(scores(nmds_T))
+
+d_scores <- merge(d_scores, CompletePS@sam_data, by=0, all=TRUE)  
+
+# Remove outliers or change the axes
+
+d_scores <- d_scores[-c(1, 37),] # Maybe 64
+
+# Plotting with ggplot
+
+Tgg <- ggplot(data = d_scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(data = d_scores, aes(colour = Dev_Stage), size = 3, alpha = 0.5) + 
+  scale_colour_manual(values = c("darkolivegreen", "darkolivegreen1", "darkgoldenrod")) + 
+  theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+        axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+        legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        legend.text = element_text(size = 9, colour = "grey30")) +
+  labs(colour = "Tissue")
+  # + stat_ellipse(aes(x = NMDS1, y = NMDS2,color=Tissue, group=Tissue),type = "norm")
+
+Tgg
+
+# Statistical analyses
+
+# Transform data to proportions as appropriate for Bray-Curtis distances
+
+Transf.data <- transform_sample_counts(CompletePS, function(otu) otu/sum(otu))
+
+BC.T <-vegdist(otu_table(Transf.data), distance="bray", binary=FALSE, diag=FALSE, upper=FALSE, na.rm=FALSE)
+
+# Calculate dispersion (variances) within each group.
+
+var.tis <- betadisper(BC.T, as.factor(CompletePS@sam_data[["Tissue"]]), type=c("median"))
+
+# Perform an ANOVA-like test to determine if the variances differ by groups.
+# H0: no difference between the groups being compared.
+
+permutest(var.tis, permutations=1000)
+
+# within-group variances are NOT equal or homogenous so the differences observed 
+# by adonis might be a result of this. It is recommended to use a permutation-based 
+# method that does not assume equal variances, such as the PERMDISP test.
+
+plot(var.tis, hull = FALSE, ellipse = TRUE, main = NULL)
+
+var.tis
+
+Var.scores <- data.frame(Tissue = c('Leaf', 'Sapwood'), Variance = c(0.6289, 0.6463))
+
+ggplot(Var.scores, aes(x = Location, y = Variance), fill = Variance) +
+  geom_point(shape=18, size=3) + geom_line(group=1) +
+  theme_classic() +
+  ylim(0.5,0.7) + ylab("Within-group variance")
+
+# Run PERMANOVA on distances.
+# H0: no difference in multivariate dispersion between groups
+
+adonis2(BC.T ~ CompletePS@sam_data$Tissue, permutations = 1000, method = "bray")
+
+# HYPOTHESIS 3
+
+# Microbiomes are affected by tissue developmental stage
+# Only leaves
+
+LeavesPS <- subset_samples(DataSet, Tissue == "Leaf")
+
+LeavesPS <- prune_taxa(taxa_sums(LeavesPS) > 0, LeavesPS)
+any(taxa_sums(LeavesPS) == 0)
+
+# Shared ASVs
+
+ps_venn(LeavesPS, group = "Dev_Stage")
+
+# Alpha Diversity
+
+NL <- subset_samples(LeavesPS, Dev_Stage == "New") 
+ML <- subset_samples(LeavesPS, Dev_Stage == "Mature") 
+
+# Investigate if data is normal: plot each metric.
+
+rich_DS <- estimate_richness(LeavesPS, measures = c("Shannon", "InvSimpson", "Chao1"))
+rich_DS$Hill <- exp(rich_DS$Shannon)
+rich_DS
+
+N_S <- sapply(rich_S, function(x) length(x))
+
+M_S <- sapply(rich_S, function(x) mean(x))
+
+SD_S <- sapply(rich_S, function(x) sd(x))
+
+SE_S <- SD_S/sqrt(N_S)
+
+# Plot 
+
+plot_richness(LeavesPS, x="Dev_Stage", shape = NA, color="Dev_Stage", measures=c("Observed", "Shannon", "Simpson", "Chao1", "InvSimpson"))+ 
+  geom_boxplot(outlier.shape=NA, outlier.colour = NA, notch = TRUE, notchwidth = 0.5)
+
+RD_Leaves <- estimate_richness(LeavesPS, measures = c("Shannon", "Simpson", "InvSimpson", "Chao1"))
+RD_Leaves$Hill <- exp(RD_Leaves$Shannon)
+
+#Then plot each metric.
+
+par(mfrow=c(2,2))
+
+hist1 <- hist(RD_Leaves$Hill, main="Shannon diversity", xlab="", breaks=10)
+hist3 <- hist(RD_Leaves$InvSimpson, main="Inv Simpson diversity", xlab="", breaks=10)
+hist4 <- hist(RD_Leaves$Chao1, main="Chao richness", xlab="", breaks=15)
+
+par(mfrow=c(1,1))
+
+# Q-Q Plot
+
+qq1<- ggqqplot(RD_Leaves$Hill, title = "Shannon")
+qq2<- ggqqplot(RD_Leaves$Simpson, title = "Simpson")
+qq3<- ggqqplot(RD_Leaves$InvSimpson, title = "Inv Simpson")
+qq4<- ggqqplot(RD_Leaves$Chao1, title = "Chao")
+
+plot_grid(qq1, qq2, qq3, qq4,
+          ncol=2, nrow=2)
+
+shapiro.test(RD_Leaves$Hill)
+shapiro.test(RD_Leaves$Simpson)
+shapiro.test(RD_Leaves$InvSimpson)
+shapiro.test(RD_Leaves$Chao1)
+
+# none are normal
+
+# Non-normally distributed metrics
+
+wilcox.test(Age_values$New, Age_values$Mature, p.adjust.method="fdr")
+
+# NMDS
+
+set.seed(0633)
+
+nmdsL <- metaMDS(otu_table(LeavesPS), distance = "bray", trymax = 100)
+
+# Extracting scores
+
+L_scores <- as.data.frame(scores(nmdsL))
+
+# Add columns to data frame 
+
+L_scores <- merge(L_scores, LeavesPS@sam_data, by=0, all=TRUE)  # by=0 equals by="row.names"
+
+# Plotting with ggplot
+
+Lgg <- ggplot(data = L_scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(data = L_scores, aes(colour = Tribe, shape = Dev_Stage), size = 3, alpha = 0.5) + 
+  #scale_colour_manual(values = c("darkolivegreen", "darkolivegreen1")) + 
+  theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+        axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+        legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+        legend.text = element_text(size = 9, colour = "grey30")) +
+  labs(colour = "Tribe", shape = "Developmental Stage")
+
+Lgg
+
+# Statistical analyses
+
+# Transform data to proportions as appropriate for Bray-Curtis distances 
+
+LPData <- transform_sample_counts(LeavesPS, function(otu) otu/sum(otu))
+
+BC.L <-vegdist(otu_table(LPData), distance="bray", binary=FALSE, diag=FALSE, upper=FALSE, na.rm=FALSE)
+
+# Calculate dispersion (variances) within each group.
+
+var.age <- betadisper(BC.L, LeavesPS@sam_data[["Dev_Stage"]], type=c("median"))
+
+# Perform an ANOVA-like test to determine if the variances differ by groups.
+
+permutest(var.age, permutations=1000)
+
+plot(var.age, hull = FALSE, ellipse = TRUE, main = NULL)
+
+var.age
+
+Var.scores <- data.frame(Location = c('Golfito', 'Guanacaste'), Variance = c(0.6276, 0.6479))
+
+ggplot(Var.scores, aes(x = Location, y = Variance), fill = Variance) +
+  geom_point(shape=18, size=3) + geom_line(group=1) +
+  theme_classic() +
+  ylim(0.5,0.7) + ylab("Within-group variance")
+
+# Run PERMANOVA on distances.
+
+adonis2(BC.L ~ LeavesPS@sam_data$Dev_Stage, permutations = 1000, method = "bray")
+# Run PERMANOVA on distances.
+
+# ______________________
+# Species acumulation curves
+
+# iNEXT
+
+GuanaD <- subset_samples(DataSet, Location == "Guanacaste") 
+GolfitoD <- subset_samples(DataSet, Location == "Golfito") 
+
+# Raw incidence tables:
+
+GuD_df <- ifelse (abundances(GuanaD)>0, 1, 0)
+GD_df <- ifelse (abundances(GolfitoD)>0, 1, 0)
+
+all <- list (GuanaD = GuD_df, GolfitoD = GD_df)  # combine matrices into list
+
+# First, check information related to each dataset (YL, ML, Sa):
+
+DataInfo (all, datatype = 'incidence_raw')
+
+# One shared feature is that all three have high proportion of single occurrences (Q1), indicating incompleteness
+
+# Calculate rarefaction curves for all three datasets, q = 0 (species richness), plot it
+iN_0 <- iNEXT (all, datatype = 'incidence_raw', q = 0)
+gg_0 <- ggiNEXT(iN_0, type=1, se=TRUE, facet.var="none", color.var="site", grey=FALSE) + 
+  theme_classic() + ggtitle ('q = 0') + theme(legend.position="none")
+# The curves show that regarding species richness, the curves are far from leveling off
+
+# But if the interest is not in species richness, but richness of dominant species (Hill's q = 2), the situation may be more optimistic:
+iN_2 <- iNEXT (all, datatype = 'incidence_raw', q = 2)
+gg_2 <- ggiNEXT(iN_2, type=1, se=TRUE, facet.var="none", color.var="site", grey=FALSE) +
+  theme_classic() + ggtitle ('q = 2') + theme(legend.position="none")
+# The curves for ML and YL seem to level off (but not for Sa)
+
+iN_1 <- iNEXT (all, datatype = 'incidence_raw', q = 1)
+gg_1 <- ggiNEXT(iN_1, type=1, se=TRUE, facet.var="none", color.var="site", grey=FALSE) + 
+  theme_classic() + ggtitle ('q = 1') + theme(legend.position="none")
+
+# Plot both together
+
+grid.arrange(gg_0, gg_1, gg_2, ncol = 3, nrow = 1)
