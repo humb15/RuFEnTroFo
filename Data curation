@@ -1,0 +1,332 @@
+library(phyloseq)
+library(microbiome)
+
+# Import sample data
+# Transform numbers to text strings for graph purposes
+
+Sample_data <- read_excel("~/Desktop/Metabarcoding/Taxa_Assignment/Metadata/Sample_data.xlsx",
+                          col_types = c("text","text", "text", "text", "text","text", "text", "text", 
+                                        "text", "text", "text", "numeric", "numeric", "numeric", 
+                                        "numeric", "numeric"))
+
+Metadata <- read_excel("~/Desktop/Metabarcoding/Taxa_Assignment/Metadata/Metadata.xlsx",
+           col_types = c("text", "text", "text", "text","text", "text", "text", 
+                         "text", "text", "text", "numeric", "numeric", "numeric", 
+                         "numeric", "numeric"))
+
+Sample_data <- as.data.frame(Sample_data)
+Metadata <- as.data.frame(Metadata)
+
+# Sample_data[,col_names] = lapply(Sample_data[,col_names], factor)
+
+# sample_data(Data_prunedSet) <- Sample_data
+
+#SplNm <- sort(c(WildRub, bark))
+
+#rownames(Sample_data) <- SplNm
+
+rownames(Sample_data) <- Sample_data[,1]
+rownames(Metadata) <- Metadata[,1]
+
+Metadata <- Metadata[,-1,drop=FALSE]
+Sample_data <- Sample_data[,-1,drop=FALSE]
+
+# To drop columns: Sample_data <- Sample_data[,-(7:12),drop=FALSE]
+
+# To change names: names(Sample_data)[11] <- "Altitude"
+
+# Load taxa file and seqtab if not in directory.
+
+# Manipulate
+
+# We can now construct a phyloseq object directly from the dada2 outputs.
+
+DataSet <- phyloseq(otu_table(seqtab.Final, taxa_are_rows=FALSE), 
+                    sample_data(Sample_data), 
+                    tax_table(taxa))
+
+DataSet
+
+dna_Set <- Biostrings::DNAStringSet(taxa_names(DataSet))
+names(dna_Set) <- taxa_names(DataSet)
+DataSet <- merge_phyloseq(DataSet, dna_Set)
+taxa_names(DataSet) <- paste0("ASV", seq(ntaxa(DataSet)))
+DataSet
+
+# Merge replicates of samples
+
+DataSet <- merge_samples(DataSet, "Individual")
+sample_data(DataSet) <- Metadata
+#SD <- merge_samples(sample_data(Data_prunedSet), "Individual")
+
+# Keep only sequences that are actually fungi.
+
+#DataSet_pruned <- subset_taxa(DataSet, !is.na(kingdom))
+DataSet_pruned <- subset_taxa(DataSet, kingdom =="Fungi")
+
+# Delete samples with very few reads
+
+DataSet_pruned <- prune_samples(sample_sums(DataSet_pruned) > 0, DataSet_pruned)
+DataSet_pruned <- subset_samples(DataSet_pruned, sample_sums(DataSet_pruned) > 1e-5)
+
+# Keep only those with taxa assigned 
+
+# Data_endophytes <- phyloseq_rm_na_tax(DataSet_pruned@tax_table)
+
+DataVar <- transform_sample_counts(DataSet_pruned, function(x) x / sum(x))
+hist(log10(apply(otu_table(DataVar), 1, var)),
+     xlab="log10(variance)", breaks=50,
+     main="Variance across samples")
+
+# Independent filtering
+
+#If there are ASVs with no counts, we should remove them 
+
+DataSet_pruned <- prune_taxa(taxa_sums(DataSet_pruned) > 0, DataSet_pruned)
+any(taxa_sums(DataSet_pruned) == 0)
+
+# Filter OTUs for which the variance across all samples is very low
+
+varianceThreshold <- 1e-5
+x <- taxa_sums(DataSet_pruned)
+keepTaxa <- (x / sum(x)) > varianceThreshold
+Data_prunedSet <- prune_taxa(keepTaxa, DataSet_pruned)
+
+# WhatTaxa <- taxa_names(Data_Set)[which((x / sum(x)) > varianceThreshold)]
+
+# Check if there are ASVs with no counts and how many there are.
+# If there are ASVs with no counts, we should remove them.
+
+any(taxa_sums(Data_prunedSet) == 0)
+sum(taxa_sums(Data_prunedSet) == 0)
+
+# Number of taxa that are kept
+
+ntaxa(Data_prunedSet)
+
+# Number of samples that are kept
+
+nsamples(Data_prunedSet)
+
+head(sample_sums(Data_prunedSet))
+
+# Check distribution
+
+SeqDepth <- rowSums(otu_table(Data_prunedSet))
+
+sort(SeqDepth)
+min(SeqDepth)
+max(SeqDepth)
+
+sample_data(Data_prunedSet)$SeqDepth <- paste(SeqDepth)
+qplot(log10(SeqDepth), geom = "histogram") + theme_bw()
+
+# Number of unique ASVs per sample
+
+rowSums(otu_table(Data_prunedSet) != 0)
+
+# Explore feature prevalence in the dataset. 
+# Defined here as the number of samples in which a taxon appears at least once.
+
+prevalenceThreshold <- 0.001 * nsamples(DataSet)
+prevalenceThreshold
+
+# Compute and store as data.frame
+# Counts the number of elements that are greater than zero
+
+prevdf <- apply(X = otu_table(DataSet),
+                MARGIN = ifelse(taxa_are_rows(DataSet), yes = 1, no = 2),
+                FUN = function(x){sum(x > 0)})
+
+ASVCts <- t(as.data.frame(otu_table(DataSet)))
+t_table <- as.data.frame(tax_table(DataSet))
+
+ASVCts <- transform(merge(t_table,ASVCts,by=0,all=TRUE))
+rownames(ASVCts) <- ASVCts$Row.names
+ASVCts$Row.names <- NULL
+
+# Keeping family only
+
+ASVCts <- ASVCts[,-c(1:4,6:7),drop=FALSE]
+ASVCts <- ASVCts %>% drop_na()
+
+rownames(ASVCts) <- ASVCts[,1]
+ASVCts <- ASVCts[,-1,drop=FALSE]
+
+AbCts <-  rowsum(ASVCts[,-1], group = ASVCts$Family, na.rm = T)
+
+PrevCts <- data.frame(rowSums(AbCts > 0))
+
+TotAb <- data.frame(rowSums(AbCts))
+
+# Add taxonomy and total read counts to this data.frame
+
+prevdf <- data.frame(Prevalence = prevdf,
+                     Abundance = taxa_sums(DataSet),
+                     tax_table(DataSet))
+
+#PrevCt <- data.frame(prevdf %>% count(Prevalence, family))
+
+# Execute prevalence filter, using `prune_taxa()` function
+
+TaxatoKeep <- rownames(prevdf)[(prevdf$Prevalence >= prevalenceThreshold)]
+DataSet<- prune_taxa(TaxatoKeep, DataSet)
+
+# Compute the total and average prevalence of the features in each class.
+
+plyr::ddply(prevdf, "family", function(df1){cbind(mean(df1$Prevalence),sum(df1$Prevalence))})
+
+top_phyla <- prevdf %>%
+  group_by(family) %>%
+  summarize_at("Abundance", sum)
+
+top_phyla$Proportion <- top_phyla$Abundance / sum(top_phyla$Abundance) * 100
+
+Prev <- prevdf %>%
+        group_by(family) %>%
+        summarize_at("Prevalence", mean) #can't compute like that, with 'mean'
+
+Prev$Proportion <- Prev$Prevalence / 123 * 100 #number of samples (max prevalence)
+
+# Real prevalence
+
+# Map ASVs to families
+otu_table_mapped <- merge(t(otu_table(DataSet)), tax_table(DataSet), by = "row.names")
+otu_table_mapped <- otu_table_mapped[,-(125:128),drop=FALSE]
+otu_table_mapped <- otu_table_mapped[,-(126:127),drop=FALSE]
+
+# Summarize prevalence by family
+prevalence_by_family <- aggregate(otu_table_mapped[, -1], by = list(family = otu_table_mapped$family), FUN = function(x) sum(x > 0))
+
+# Rename the first column to "Family"
+colnames(prevalence_by_family)[1] <- "Family"
+
+top_phyla <- prevdf %>%
+  group_by(family) %>%
+  summarize_at("Abundance", sum)
+
+taxa <- data.frame(tax_table(DataSet))
+taxa <- distinct(taxa)
+
+uniques <- taxa %>%
+  dplyr::group_by(phylum, order) %>%
+  dplyr::summarise(n = dplyr::n(), .groups = "drop") 
+
+# uniques <- pivot_wider(uniques, names_from = order, values_from = n) 
+
+# If you wanted to subset the taxa
+
+# prevdf1 <- subset(prevdf, order %in% get_taxa_unique(DataSet, "order"))
+
+# Each point is a different taxa:
+
+ggplot(prevdf, aes(Abundance, Prevalence / nsamples(Data_prunedSet),color=order)) +
+  # Include a guess for parameter
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) +  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~order) + theme(legend.position="none") +  theme(axis.text.x = element_text(angle = 90))
+
+# Summarize the contents
+
+# Total number of reads
+
+sum(otu_table(DataSet))
+
+summarize_phyloseq(DataSet)
+
+# Pick metadata as data.frame if not like this already.
+# meta <- meta(Data_prunedSet)
+
+# Taxonomy table:
+taxonomy <- tax_table(DataSet)
+
+#Abundances for taxonomic groups ('OTU table') as a Taxa x Samples matrix:
+
+# Absolute abundances
+otu.absolute <- abundances(DataSet)
+
+# Relative abundances
+otu.relative <- abundances(DataSet, "compositional")
+
+# Melting phyloseq data for easier plotting:
+
+df <- as.data.frame(psmelt(DataSet))
+
+# Most abundant taxa
+
+topx <- top_taxa(DataSet, n = 25)
+
+# List unique order-level groups:
+
+sort(get_taxa_unique(DataSet, "order"))
+
+# Pick the taxa abundances for a given sample:
+
+# samplename <- sample_names(Data_prunedSet)[[1]]
+
+# Pick abundances for a particular taxon
+
+# tax.abundance <- abundances(Data_prunedSet)[, samplename]
+
+# Abundance of a given species in each sample
+
+# head(abundances(Data_prunedSet)["Trichoderma",])
+
+# List of Genus in a given Order
+
+# taxalist <- map_levels(NULL, "Order", "Genus", Data_prunedSet)$Hypocreales
+
+# Number of reads, total and per sample
+
+sample_sums(DataSet)
+sum(sample_sums(DataSet))
+sort(sample_sums(DataSet))
+
+mean(sample_sums(DataSet))
+
+# Percentage of identification based on amount of NAs
+
+colSums(is.na(taxa))
+
+sum(is.na(taxa$genus))
+
+# iNEXT
+
+YL <- subset_samples(DataSet, Dev_Stage == "New") #contains only new leaves data: 142 samples x 3129 ASV
+ML <- subset_samples(DataSet, Dev_Stage == "Mature") #contains mature leaves data: 143 samples x 3129 ASV
+SW <- subset_samples(DataSet, Tissue == "Sapwood") #contains sapwood data: 23 samples x 3129 ASV
+
+# It's suggested to keep the original tables for each data set and convert them into raw incidence tables:
+YL_df <- ifelse (abundances(YL)>0, 1, 0)
+ML_df <- ifelse (abundances(ML)>0, 1, 0)
+Sa_df <- ifelse (abundances(SW)>0, 1, 0)
+
+all <- list (YL = YL_df, ML = ML_df, Sa = Sa_df)  # combine matrices into list
+
+# First, check information related to each dataset (YL, ML, Sa):
+
+DataInfo (all, datatype = 'incidence_raw')
+
+# One shared feature is that all three have high proportion of single occurrences (Q1), indicating incompleteness
+
+# Calculate rarefaction curves for all three datasets, q = 0 (species richness), plot it
+iN_0 <- iNEXT (all, datatype = 'incidence_raw', q = 0)
+gg_0 <- ggiNEXT(iN_0, type=1, se=TRUE, facet.var="None", color.var="Assemblage", grey=FALSE) + 
+  theme_classic() + ggtitle ('q = 0') + theme(legend.position="none")
+
+# The curves show that regarding species richness, the curves are far from leveling off
+
+# But if the interest is not in species richness, but richness of dominant species (Hill's q = 2), the situation may be more optimistic:
+iN_2 <- iNEXT (all, datatype = 'incidence_raw', q = 2)
+gg_2 <- ggiNEXT(iN_2, type=1, se=TRUE, facet.var="None", color.var="Assemblage", grey=FALSE) +
+  theme_classic() + ggtitle ('q = 2') + theme(legend.position="none")
+# The curves for ML and YL seem to level off (but not for Sa)
+
+iN_1 <- iNEXT (all, datatype = 'incidence_raw', q = 1)
+gg_1 <- ggiNEXT(iN_1, type=1, se=TRUE, facet.var="None", color.var="Assemblage", grey=FALSE) +
+  theme_classic() + ggtitle ('q = 1') + theme(legend.position="none")
+
+# Plot both together
+
+grid.arrange(gg_0, gg_1, gg_2, ncol = 3, nrow = 1)
+
