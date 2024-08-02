@@ -175,13 +175,13 @@ head(taxa.print)
 
 # Evaluating DADA2's accuracy on positive control:
 
-# unqs.russula <- ST_Golfito["POS_CTRL",]
-# unqs.russula <- sort(unqs.russula[unqs.russula>0], decreasing=TRUE) # Drop ASVs absent in the Positive control
-# cat("DADA2 inferred", length(unqs.russula), "sample sequences present in the Positive control.\n")
+unqs.russula <- ST_Golfito["POS_CTRL",]
+unqs.russula <- sort(unqs.russula[unqs.russula>0], decreasing=TRUE) # Drop ASVs absent in the Positive control
+cat("DADA2 inferred", length(unqs.russula), "sample sequences present in the Positive control.\n")
 
-# PosCtrl.ref <- getSequences(file.path(path, "/PATH/Russula.fasta"))
-# match.ref <- sum(sapply(names(unqs.russula), function(x) any(grepl(x, PosCtrl.ref))))
-# cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
+PosCtrl.ref <- getSequences(file.path(path, "/PATH/Russula.fasta"))
+match.ref <- sum(sapply(names(unqs.russula), function(x) any(grepl(x, PosCtrl.ref))))
+cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
 
 # Ends of the DADA2 portion
 
