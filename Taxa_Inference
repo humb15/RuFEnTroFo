@@ -112,9 +112,9 @@ colnames(track) <- c("input", "filtered", "denoised", "tabled", "nonchim")
 rownames(track) <- sample.names
 head(track)
 
-# Filter out seqs found in controls
+# Filter out seqs found in negative controls
 
-ctrl.samples <- c("NEG_CTRL", "POS_CTRL", "CONTROL") # CHANGE to names of your negative controls
+ctrl.samples <- c("NEG_CTRL", "CONTROL") # CHANGE to names of your negative controls
 found.in.ctrls <- colSums(seqtab.nochim[ctrl.samples,])>0
 seqtab.Final <- seqtab.nochim[,!found.in.ctrls]
 
