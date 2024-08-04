@@ -31,10 +31,6 @@ rownames(Metadata) <- Metadata[,1]
 Metadata <- Metadata[,-1,drop=FALSE]
 Sample_data <- Sample_data[,-1,drop=FALSE]
 
-# To drop columns: Sample_data <- Sample_data[,-(7:12),drop=FALSE]
-
-# To change names: names(Sample_data)[11] <- "Altitude"
-
 # Load taxa file and seqtab if not in directory.
 
 # Manipulate
@@ -67,7 +63,7 @@ DataSet_pruned <- subset_taxa(DataSet, kingdom =="Fungi")
 # Delete samples with very few reads
 
 DataSet_pruned <- prune_samples(sample_sums(DataSet_pruned) > 0, DataSet_pruned)
-DataSet_pruned <- subset_samples(DataSet_pruned, sample_sums(DataSet_pruned) > 1e-5)
+DataSet_pruned <- subset_samples(DataSet_pruned, sample_sums(DataSet_pruned) > 1e-4)
 
 # Keep only those with taxa assigned 
 
@@ -80,9 +76,14 @@ hist(log10(apply(otu_table(DataVar), 1, var)),
 
 # Independent filtering
 
-#If there are ASVs with no counts, we should remove them 
+#If there are ASVs with no counts or below 0.001, we should remove them 
 
-DataSet_pruned <- prune_taxa(taxa_sums(DataSet_pruned) > 0, DataSet_pruned)
+# Calculate the threshold value
+total_reads <- sum(taxa_sums(DataSet))
+threshold <- 0.001 / 100 * total_reads  # 0.001% of total reads
+
+# Remove reads below the threshold
+DataSet_pruned <- prune_taxa(taxa_sums(DataSet) >= threshold, DataSet_pruned)
 any(taxa_sums(DataSet_pruned) == 0)
 
 # Filter OTUs for which the variance across all samples is very low
