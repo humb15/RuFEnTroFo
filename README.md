@@ -17,18 +17,18 @@ This directory focuses on data quality control and filtering. It manipulates the
 #### 3. Ecological_Analyses
 This directory contains scripts for conducting various ecological analyses, including:
 
-Alpha diversity analysis
-Beta diversity analysis (Non-metric Multidimensional Scaling (NMDS), PERMANOVA)
-Species accumulation curves
+* Alpha diversity analysis
+* Beta diversity analysis (Non-metric Multidimensional Scaling (NMDS), PERMANOVA)
+* Species accumulation curves
 
 #### 4. Ecological_Analyses_2
 Here you'll find scripts for more advanced ecological analyses, including:
 
-Identification of top families based on overall abundance
-Taxonomy plotted
-Fungal traits analysis
-Clam test for classifying generalists and specialists in two distinct habitats
-Indicator species and prevalence analyses
+* Identification of top families based on overall abundance
+* Taxonomy plotted
+* Fungal traits analysis
+* Clam test for classifying generalists and specialists in two distinct habitats
+* Indicator species and prevalence analyses
 
 ### **Additional Files**
 TaxaFuncT.xlsx: Contains full taxonomic classification and functional traits based on primary lifestyle of all ASVs.
@@ -36,10 +36,10 @@ TaxaFuncT.xlsx: Contains full taxonomic classification and functional traits bas
 ### **Usage**
 To utilize the scripts and tools provided in this repository, follow these steps:
 
-Clone the repository to your local machine.
-Navigate to the desired directory for your analysis.
-Execute the scripts using an appropriate environment (R, Rstudio) and provide the necessary input data.
-Refer to this README file for detailed information on where to find specific scripts.
+- Clone the repository to your local machine.
+- Navigate to the desired directory for your analysis.
+- Execute the scripts using an appropriate environment (R, Rstudio) and provide the necessary input data.
+- Refer to this README file for detailed information on where to find specific scripts.
 
 ### **About**
 This repository serves as a resource for researchers interested in the ecological dynamics of Rubiaceae-associated fungal endophytes in tropical forests. It provides a suite of tools for analyzing and interpreting ecological data, as well as assigning taxonomy and exploring functional traits associated with these fungi.
