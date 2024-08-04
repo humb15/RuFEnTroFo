@@ -8,14 +8,20 @@ This repository is primarily intended for the audience of our associated paper "
 
 ### **Contents**
 
-#### 1. Ecological_Analyses
+#### 1. Taxa_Inference
+This directory hosts scripts for taxa inference using a modified DADA2 pipeline. This customized pipeline is optimized for accurately assigning taxonomy to fungal Amplified Sequence Variants (ASVs) from the Rubiaceae-associated fungal endophytes dataset (BioProject PRJNA889378).
+
+#### 2. Data Curation
+This directory focuses on data quality control and filtering. It manipulates the phyloseq object from the Taxa_Inference directory, prunes taxa and samples based on specified thresholds, and performs prevalence analysis, including visualization.
+
+#### 3. Ecological_Analyses
 This directory contains scripts for conducting various ecological analyses, including:
 
-Alpha analysis
-Beta analysis (Non-metric Multidimensional Scaling (NMDS), PERMANOVA)
+Alpha diversity analysis
+Beta diversity analysis (Non-metric Multidimensional Scaling (NMDS), PERMANOVA)
 Species accumulation curves
 
-#### 2. Ecological_Analyses_2
+#### 4. Ecological_Analyses_2
 Here you'll find scripts for more advanced ecological analyses, including:
 
 Identification of top families based on overall abundance
@@ -23,9 +29,6 @@ Taxonomy plotted
 Fungal traits analysis
 Clam test for classifying generalists and specialists in two distinct habitats
 Indicator species and prevalence analyses
-
-#### 3. Taxa_Inference
-This directory hosts scripts for taxa inference using a modified DADA2 pipeline. This customized pipeline is optimized for accurately assigning taxonomy to fungal Amplified Sequence Variants (ASVs) from the Rubiaceae-associated fungal endophytes dataset (BioProject PRJNA889378).
 
 ### **Additional Files**
 TaxaFuncT.xlsx: Contains full taxonomic classification and functional traits based on primary lifestyle of all ASVs.
